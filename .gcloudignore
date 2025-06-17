@@ -1,0 +1,17 @@
+# Node modules & caches
+node_modules/
+npm-debug.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment & credentials
+.env
+*.env
+credentials.json
+
+# Misc
+.DS_Store
+.vscode/
+*.log
