@@ -1,8 +1,6 @@
 fastapi
-gunicorn
-uvicorn[standard]
-gspread
-google-auth
+uvicorn
+python-dotenv
 google-api-python-client
-google-auth-oauthlib
-python-multipart
+gspread
+oauth2client
