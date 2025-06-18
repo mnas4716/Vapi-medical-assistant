@@ -1,10 +1,8 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 import traceback
-import hmac
-import hashlib
 from datetime import datetime, timedelta
 
 from clinic_manager import ClinicManager
@@ -40,23 +38,8 @@ async def root():
 async def vapi_webhook(request: Request):
     """
     Main endpoint for Vapi function calls
-    Handles authentication and routes to appropriate functions
+    Routes to appropriate functions (no security check)
     """
-    # HMAC security verification
-    secret = os.getenv("VAPI_SECRET_KEY")
-    if secret:
-        signature = request.headers.get("x-vapi-signature")
-        if not signature:
-            print("❌ Security Error: Missing x-vapi-signature header")
-            raise HTTPException(status_code=401, detail="Missing signature")
-        
-        body = await request.body()
-        expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        
-        if not hmac.compare_digest(expected_signature, signature):
-            print("❌ Security Error: Invalid signature")
-            raise HTTPException(status_code=401, detail="Invalid signature")
-
     try:
         payload = await request.json()
     except Exception as e:
