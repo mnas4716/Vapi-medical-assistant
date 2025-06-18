@@ -5,14 +5,11 @@ npm-debug.log
 # Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
 
 # Secrets
 .env
 *.env
-*.json
-credentials/*
+credentials.json
 
 # System / IDE
 .DS_Store
