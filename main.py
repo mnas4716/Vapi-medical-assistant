@@ -68,21 +68,30 @@ async def vapi_webhook(request: Request):
     except Exception as e:
         return {"error": f"Exception: {str(e)}"}
 
-# === Vapi Webhook Endpoints ===
+# === Vapi Webhook Endpoints (MODIFIED for empty body safety) ===
 @app.post("/webhooks/status-update")
 async def status_update(request: Request):
-    data = await request.json()
+    try:  # MODIFIED
+        data = await request.json()
+    except Exception:
+        data = {}
     print("✅ Received status-update:", data)
     return {"status": "received"}
 
 @app.post("/webhooks/speech-update")
 async def speech_update(request: Request):
-    data = await request.json()
+    try:  # MODIFIED
+        data = await request.json()
+    except Exception:
+        data = {}
     print("✅ Received speech-update:", data)
     return {"status": "received"}
 
 @app.post("/webhooks/conversation-update")
 async def conversation_update(request: Request):
-    data = await request.json()
+    try:  # MODIFIED
+        data = await request.json()
+    except Exception:
+        data = {}
     print("✅ Received conversation-update:", data)
     return {"status": "received"}
