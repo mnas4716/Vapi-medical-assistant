@@ -20,17 +20,19 @@ def get_google_services():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/calendar"
     ]
-    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
-    if not creds_json:
+    creds_json_b64 = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    if not creds_json_b64:
         raise ValueError("GOOGLE_CREDENTIALS_JSON environment variable not set.")
-    creds_dict = json.loads(base64.b64decode(creds_json))
+    
+    creds_dict = json.loads(base64.b64decode(creds_json_b64))
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    
     sheets_service = gspread.authorize(creds)
     calendar_service = build('calendar', 'v3', credentials=creds)
     return sheets_service, calendar_service
 
 def find_patient_in_sheet(mobile_number=None, dob=None):
-    """Looks for a patient by mobile number (prefer) or by DOB. Returns dict if found, else None."""
+    """Looks for a patient by mobile number (preferred) or by DOB. Returns dict if found, else None."""
     try:
         sheets_service, _ = get_google_services()
         sheet = sheets_service.open(SHEET_NAME).sheet1
@@ -39,19 +41,19 @@ def find_patient_in_sheet(mobile_number=None, dob=None):
         if mobile_number:
             for patient in all_patients:
                 if str(patient.get('mobileNumber', '')).strip() == str(mobile_number).strip():
-                    print(f"\u2705 Found patient by mobile: {patient.get('fullName')}")
+                    print(f"✅ Found patient by mobile: {patient.get('fullName')}")
                     return patient
 
         if dob:
             for patient in all_patients:
                 if str(patient.get('dob', '')).strip() == str(dob).strip():
-                    print(f"\u2705 Found patient by DOB: {patient.get('fullName')}")
+                    print(f"✅ Found patient by DOB: {patient.get('fullName')}")
                     return patient
 
-        print("\u274C Patient not found by mobile or DOB.")
+        print("❌ Patient not found by mobile or DOB.")
         return None
     except Exception as e:
-        print(f"\u274C Error finding patient in sheet: {e}")
+        print(f"❌ Error finding patient in sheet: {e}")
         return None
 
 def register_patient_in_sheet(details):
@@ -61,32 +63,30 @@ def register_patient_in_sheet(details):
         headers = sheet.row_values(1)
         new_row = [details.get(h, '') for h in headers]
         sheet.append_row(new_row)
-        print(f"\u2705 Successfully registered: {details.get('fullName')}")
+        print(f"✅ Successfully registered: {details.get('fullName')}")
         return True
     except Exception as e:
-        print(f"\u274C Error registering patient: {e}")
+        print(f"❌ Error registering patient: {e}")
         return False
 
-def check_calendar_availability(iso_datetime_str, mobile_number=None, dob=None):
-    """Check if a slot is available for a specific patient (if you want to filter per patient; else you can ignore the patient lookup here)"""
+def check_calendar_availability(iso_datetime_str):
     try:
         _, calendar_service = get_google_services()
+        # Vapi might send 'Z' for UTC, which fromisoformat doesn't like without replacement
+        if iso_datetime_str.endswith('Z'):
+             iso_datetime_str = iso_datetime_str[:-1] + '+00:00'
         requested_time = datetime.fromisoformat(iso_datetime_str)
+
         if not (CLINIC_OPEN_HOUR <= requested_time.hour < CLINIC_CLOSE_HOUR):
             return "Sorry, that time is outside our clinic hours (9 AM – 5 PM)."
 
         time_min_iso = requested_time.isoformat() + 'Z'
         time_max_iso = (requested_time + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)).isoformat() + 'Z'
 
-        events_result = calendar_service.events().list(
-            calendarId=CALENDAR_ID,
-            timeMin=time_min_iso,
-            timeMax=time_max_iso,
-            singleEvents=True
-        ).execute()
+        events_result = calendar_service.events().list(calendarId=CALENDAR_ID, timeMin=time_min_iso, timeMax=time_max_iso, singleEvents=True).execute()
 
         if not events_result.get('items', []):
-            print(f"\u2705 Slot at {requested_time} is available.")
+            print(f"✅ Slot at {requested_time} is available.")
             return "AVAILABLE"
 
         suggestions = []
@@ -95,16 +95,11 @@ def check_calendar_availability(iso_datetime_str, mobile_number=None, dob=None):
 
         while len(suggestions) < 3 and search_time < day_end:
             search_time += timedelta(minutes=APPOINTMENT_DURATION_MINUTES)
-            if search_time >= day_end:
-                break
+            if search_time >= day_end: break
+            
             next_min = search_time.isoformat() + 'Z'
             next_max = (search_time + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)).isoformat() + 'Z'
-            check = calendar_service.events().list(
-                calendarId=CALENDAR_ID,
-                timeMin=next_min,
-                timeMax=next_max,
-                singleEvents=True
-            ).execute()
+            check = calendar_service.events().list(calendarId=CALENDAR_ID, timeMin=next_min, timeMax=next_max, singleEvents=True).execute()
             if not check.get('items', []):
                 suggestions.append(search_time.strftime('%-I:%M %p'))
 
@@ -113,32 +108,35 @@ def check_calendar_availability(iso_datetime_str, mobile_number=None, dob=None):
         else:
             return "I'm sorry, no free slots found later today."
     except Exception as e:
-        print(f"\u274C Error checking calendar availability: {e}")
+        print(f"❌ Error checking calendar availability: {e}")
         return "There was an error checking the calendar."
 
-def schedule_event_in_calendar(iso_datetime_str, reason, mobile_number=None, dob=None):
+def schedule_event_in_calendar(iso_datetime_str, mobile_number=None, dob=None):
     """Looks up patient, schedules event if found, returns start_time or None."""
     try:
         patient = find_patient_in_sheet(mobile_number=mobile_number, dob=dob)
         if not patient:
-            print("\u274C No patient found for scheduling.")
+            print("❌ No patient found for scheduling.")
             return None
+            
         _, calendar_service = get_google_services()
+        if iso_datetime_str.endswith('Z'):
+             iso_datetime_str = iso_datetime_str[:-1] + '+00:00'
         start_time = datetime.fromisoformat(iso_datetime_str)
         end_time = start_time + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)
 
         event = {
             'summary': f'Appointment: {patient.get("fullName", "Unknown")}',
-            'description': f'Reason: {reason}',
+            'description': f'Patient verified via system.',
             'start': {'dateTime': start_time.isoformat(), 'timeZone': 'UTC'},
             'end': {'dateTime': end_time.isoformat(), 'timeZone': 'UTC'},
         }
 
         calendar_service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
-        print(f"\u2705 Scheduled: {patient.get('fullName', 'Unknown')} at {start_time}")
+        print(f"✅ Scheduled: {patient.get('fullName', 'Unknown')} at {start_time}")
         return start_time
     except Exception as e:
-        print(f"\u274C Error scheduling appointment: {e}")
+        print(f"❌ Error scheduling appointment: {e}")
         return None
 
 def cancel_appointment_in_calendar(iso_datetime_str, mobile_number=None, dob=None):
@@ -146,28 +144,26 @@ def cancel_appointment_in_calendar(iso_datetime_str, mobile_number=None, dob=Non
     try:
         patient = find_patient_in_sheet(mobile_number=mobile_number, dob=dob)
         if not patient:
-            print("\u274C No patient found for cancellation.")
+            print("❌ No patient found for cancellation.")
             return False
+
         _, calendar_service = get_google_services()
+        if iso_datetime_str.endswith('Z'):
+             iso_datetime_str = iso_datetime_str[:-1] + '+00:00'
         target_time = datetime.fromisoformat(iso_datetime_str)
         time_min = target_time.isoformat() + 'Z'
         time_max = (target_time + timedelta(minutes=1)).isoformat() + 'Z'
 
-        events = calendar_service.events().list(
-            calendarId=CALENDAR_ID,
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True
-        ).execute().get('items', [])
+        events = calendar_service.events().list(calendarId=CALENDAR_ID, timeMin=time_min, timeMax=time_max, singleEvents=True).execute().get('items', [])
 
         for event in events:
             if patient.get("fullName", "").lower() in event.get('summary', '').lower():
                 calendar_service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
-                print(f"\u2705 Cancelled event for {patient.get('fullName', 'Unknown')}")
+                print(f"✅ Cancelled event for {patient.get('fullName', 'Unknown')}")
                 return True
 
-        print(f"\u274C No matching event found for {patient.get('fullName', 'Unknown')}")
+        print(f"❌ No matching event found for {patient.get('fullName', 'Unknown')}")
         return False
     except Exception as e:
-        print(f"\u274C Error cancelling appointment: {e}")
+        print(f"❌ Error cancelling appointment: {e}")
         return False
