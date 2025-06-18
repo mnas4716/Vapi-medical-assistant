@@ -18,3 +18,7 @@ pytz
 
 # Environment Variable Loader (for local testing)
 python-dotenv
+
+SHEET_NAME=WellnessGroveClinic_Patients
+TIME_ZONE=Australia/Sydney
+TEST_MOBILE_NUMBER=0414364374
