@@ -1,7 +1,6 @@
-# main.py
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+import os
 from datetime import datetime
 
 from clinic_manager import (
@@ -14,6 +13,9 @@ from clinic_manager import (
 
 app = FastAPI()
 
+# Optional: use environment variable for secret verification
+VAPI_SECRET_KEY = os.getenv("VAPI_SECRET_KEY")
+
 
 @app.get("/")
 async def root():
@@ -22,6 +24,12 @@ async def root():
 
 @app.post("/")
 async def vapi_webhook(request: Request):
+    # Verify secret header if it's set
+    if VAPI_SECRET_KEY:
+        incoming_secret = request.headers.get("x-vapi-secret")
+        if incoming_secret != VAPI_SECRET_KEY:
+            raise HTTPException(status_code=403, detail="Forbidden: invalid secret")
+
     try:
         payload = await request.json()
     except Exception as e:
@@ -30,21 +38,24 @@ async def vapi_webhook(request: Request):
             status_code=400
         )
 
-    message = payload.get("message", {})
-    if message.get("type") != "function-call":
+    message = payload.get("message")
+    if not message or message.get("type") != "function-call":
         return {"message": "Ignored non-function-call"}
 
     function_call = message.get("functionCall", {})
     function_name = function_call.get("name")
-    parameters = function_call.get("parameters", {})
+    parameters = function_call.get("parameters", {}) or {}
+    context = message.get("context", {}) or {}
 
-    print(f"[Vapi Call] Function: {function_name}, Parameters: {parameters}")
-    
+    print(f"[Vapi] Function: {function_name} | Parameters: {parameters}")
+
     result = {}
 
     try:
         if function_name == "findPatient":
-            patient = find_patient_in_sheet(parameters.get("dob"), parameters.get("initials"))
+            dob = parameters.get("dob")
+            initials = parameters.get("initials")
+            patient = find_patient_in_sheet(dob, initials)
             result = {"patientName": patient.get("fullName").split(" ")[0]} if patient else {"patientName": "Not Found"}
 
         elif function_name == "registerNewPatient":
@@ -56,7 +67,7 @@ async def vapi_webhook(request: Request):
             result = {"result": availability}
 
         elif function_name == "scheduleAppointment":
-            full_name = parameters.get("fullName") or message.get("context", {}).get("patientName")
+            full_name = parameters.get("fullName") or context.get("patientName")
             dt = parameters.get("dateTime")
             reason = parameters.get("reason")
             confirmed = schedule_event_in_calendar(full_name, dt, reason)
@@ -70,7 +81,8 @@ async def vapi_webhook(request: Request):
 
         else:
             result = {"error": f"Unknown function: {function_name}"}
+
     except Exception as e:
-        result = {"error": f"Exception: {str(e)}"}
+        result = {"error": f"Exception during processing: {str(e)}"}
 
     return JSONResponse(content=result)
