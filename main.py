@@ -8,20 +8,21 @@ import hmac
 import hashlib
 import traceback
 
-# Import your custom logic from the other file
-from clinic_manager import (
-    find_patient_in_sheet,
-    register_patient_in_sheet,
-    check_calendar_availability,
-    schedule_event_in_calendar,
-    cancel_appointment_in_calendar
-)
+# --- 1. IMPORT THE CLASS, NOT THE INDIVIDUAL FUNCTIONS ---
+from clinic_manager import ClinicManager
 
 # Load environment variables from a .env file for local testing
 load_dotenv()
 
 # Initialize the FastAPI application
 app = FastAPI()
+
+# --- 2. CREATE A SINGLE, SHARED INSTANCE OF THE MANAGER ---
+# This happens once when your application starts up.
+print("🚀 Initializing ClinicManager...")
+manager = ClinicManager()
+print("✅ ClinicManager is ready.")
+
 
 @app.get("/")
 async def root():
@@ -36,8 +37,7 @@ async def vapi_webhook(request: Request):
     It includes security verification and routes requests to the correct function.
     """
     
-    # --- Security Check: HMAC Signature Verification (CRITICAL IMPROVEMENT) ---
-    # This ensures the request is genuinely from Vapi and hasn't been tampered with.
+    # Security Check: HMAC Signature Verification
     secret = os.getenv("VAPI_SECRET_KEY")
     if secret:
         signature = request.headers.get("x-vapi-signature")
@@ -52,7 +52,7 @@ async def vapi_webhook(request: Request):
             print("❌ Security Error: Invalid signature.")
             raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # --- Payload Processing ---
+    # Payload Processing
     try:
         payload = await request.json()
     except Exception as e:
@@ -61,22 +61,20 @@ async def vapi_webhook(request: Request):
 
     message = payload.get("message")
     if not message or message.get("type") != "function-call":
-        # This is normal for many Vapi messages (e.g., transcript updates). We just ignore them.
         return {"message": "Ignored non-function-call message"}
 
     fn = message.get("functionCall", {}).get("name")
     params = message.get("functionCall", {}).get("parameters", {})
     
-    # --- Enhanced Logging ---
     print("\n--- Vapi Function Call Received ---")
     print(f"✅ Function Name: {fn}")
     print(f"✅ Parameters: {params}")
 
-    # --- Function Routing ---
+    # Function Routing
     try:
         if fn == "findPatient":
-            # FIXED: Now correctly passes mobileNumber and dob
-            patient = find_patient_in_sheet(
+            # --- 3. UPDATED TO USE THE MANAGER INSTANCE ---
+            patient = manager.find_patient(
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
@@ -85,20 +83,19 @@ async def vapi_webhook(request: Request):
             return result
 
         if fn == "registerNewPatient":
-            status = register_patient_in_sheet(params)
+            status = manager.register_patient(params)
             result = {"status": "Success" if status else "Failure"}
             print(f"➡️ Returning result: {result}")
             return result
 
         if fn == "checkAvailability":
-            availability = check_calendar_availability(params.get("dateTime"))
+            availability = manager.check_availability(params.get("dateTime"))
             result = {"result": availability}
             print(f"➡️ Returning result: {result}")
             return result
 
         if fn == "scheduleAppointment":
-            # FIXED: Passes verification details and no longer uses 'reason'
-            confirmation = schedule_event_in_calendar(
+            confirmation = manager.schedule_appointment(
                 iso_datetime_str=params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
@@ -108,8 +105,7 @@ async def vapi_webhook(request: Request):
             return result
 
         if fn == "cancelAppointment":
-            # FIXED: Passes verification details instead of fullName
-            cancelled = cancel_appointment_in_calendar(
+            cancelled = manager.cancel_appointment(
                 iso_datetime_str=params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
@@ -118,29 +114,26 @@ async def vapi_webhook(request: Request):
             print(f"➡️ Returning result: {result}")
             return result
 
-        # If the function name doesn't match any known functions
         print(f"❌ Unknown function called: {fn}")
         return {"error": f"Unknown function: {fn}"}
 
     except Exception as e:
-        # --- Enhanced Error Logging (CRITICAL FOR DEBUGGING) ---
         print("\n❌❌❌ AN UNEXPECTED ERROR OCCURRED ❌❌❌")
         print(f"Error Type: {type(e).__name__}")
         print(f"Error Details: {str(e)}")
         print("--- Full Traceback ---")
-        traceback.print_exc() # This prints the exact line number of the error
+        traceback.print_exc()
         print("----------------------\n")
         return {"error": f"An internal server error occurred."}
 
-# === Optional: /agent endpoint for Vapi (forwards to the main endpoint) ===
+# === Optional: /agent endpoint for Vapi ===
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
 
-# === Vapi Webhook Catch-All for Logging (CLEANUP) ===
+# === Vapi Webhook Catch-All for Logging ===
 @app.post("/webhooks/{path:path}")
 async def generic_webhook_handler(path: str, request: Request):
-    """A single endpoint to catch all status webhooks from Vapi for logging purposes."""
     try:
         data = await request.json()
     except Exception:
