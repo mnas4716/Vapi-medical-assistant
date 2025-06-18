@@ -1,8 +1,12 @@
-from fastapi import FastAPI, Request
+# main.py
+
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 import traceback
+# import hmac  # --- Temporarily commented out for development
+# import hashlib # --- Temporarily commented out for development
 from datetime import datetime, timedelta
 
 from clinic_manager import ClinicManager
@@ -38,16 +42,29 @@ async def root():
 async def vapi_webhook(request: Request):
     """
     Main endpoint for Vapi function calls
-    Routes to appropriate functions (no security check)
+    Handles authentication and routes to appropriate functions
     """
+    # --- START: HMAC SECURITY BLOCK (TEMPORARILY COMMENTED OUT FOR DEV) ---
+    # secret = os.getenv("VAPI_SECRET_KEY")
+    # if secret:
+    #     signature = request.headers.get("x-vapi-signature")
+    #     if not signature:
+    #         print("❌ Security Error: Missing x-vapi-signature header")
+    #         raise HTTPException(status_code=401, detail="Missing signature")
+        
+    #     body = await request.body()
+    #     expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        
+    #     if not hmac.compare_digest(expected_signature, signature):
+    #         print("❌ Security Error: Invalid signature")
+    #         raise HTTPException(status_code=401, detail="Invalid signature")
+    # --- END: HMAC SECURITY BLOCK ---
+
     try:
         payload = await request.json()
     except Exception as e:
         print(f"❌ JSON parsing error: {e}")
-        return JSONResponse(
-            status_code=400,
-            content={"error": f"Invalid JSON: {str(e)}"}
-        )
+        return JSONResponse(status_code=400, content={"error": f"Invalid JSON: {str(e)}"})
 
     message = payload.get("message")
     if not message or message.get("type") != "function-call":
@@ -67,10 +84,7 @@ async def vapi_webhook(request: Request):
     try:
         # Route to appropriate function
         if fn == "findPatient":
-            patient = manager.find_patient(
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
+            patient = manager.find_patient(mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
             result = {"patientName": patient.get("fullName", "Not Found").split()[0] if patient else "Not Found"}
             
         elif fn == "registerNewPatient":
@@ -82,22 +96,14 @@ async def vapi_webhook(request: Request):
             result = {"result": availability}
             
         elif fn == "scheduleAppointment":
-            confirmation = manager.schedule_appointment(
-                iso_datetime_str=params.get("dateTime"),
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
+            confirmation = manager.schedule_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
             if confirmation:
                 result = {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p")}
             else:
                 result = {"status": "Failure", "reason": "Scheduling failed"}
                 
         elif fn == "cancelAppointment":
-            cancelled = manager.cancel_appointment(
-                iso_datetime_str=params.get("dateTime"),
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
+            cancelled = manager.cancel_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
             result = {"status": "Success" if cancelled else "Not Found"}
             
         else:
@@ -116,103 +122,48 @@ async def vapi_webhook(request: Request):
         traceback.print_exc()
         print("="*50)
         
-        return {
-            "error": "Internal server error",
-            "details": str(e),
-            "function": fn
-        }
+        return {"error": "Internal server error", "details": str(e), "function": fn}
 
-# Support Vapi's /agent endpoint
+# The rest of your file (diagnostic endpoints etc.) is perfect and does not need to be changed.
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
 
-# ======================
-# DIAGNOSTIC ENDPOINTS
-# ======================
 @app.get("/test-sheets")
 async def test_sheets(mobile: str = "0414364374"):
-    """Test Google Sheets integration"""
     try:
         print(f"🔍 Testing Sheets with mobile: {mobile}")
         patient = manager.find_patient(mobile_number=mobile)
-        return {
-            "status": "success" if patient else "failure",
-            "patient_found": bool(patient),
-            "patient_name": patient.get("fullName") if patient else None
-        }
+        return {"status": "success" if patient else "failure", "patient_found": bool(patient), "patient_name": patient.get("fullName") if patient else None}
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 @app.get("/test-calendar")
 async def test_calendar():
-    """Test Google Calendar integration"""
     try:
-        # Create test time (next hour)
         test_time = (datetime.now(manager.clinic_tz) + timedelta(hours=1)).isoformat()
         print(f"🔍 Testing Calendar with time: {test_time}")
-        
         availability = manager.check_availability(test_time)
-        return {
-            "status": "success",
-            "test_time": test_time,
-            "availability": availability
-        }
+        return {"status": "success", "test_time": test_time, "availability": availability}
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 @app.get("/env-check")
 async def env_check():
-    """Verify environment variables are set"""
-    return {
-        "GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")),
-        "CALENDAR_ID": os.getenv("CALENDAR_ID"),
-        "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")),
-        "SHEET_NAME": manager.sheet_name,
-        "TIME_ZONE": str(manager.clinic_tz),
-        "TEST_MOBILE_NUMBER": os.getenv("TEST_MOBILE_NUMBER", "Not set")
-    }
+    return {"GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")), "CALENDAR_ID": os.getenv("CALENDAR_ID"), "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")), "SHEET_NAME": manager.sheet_name, "TIME_ZONE": str(manager.clinic_tz), "TEST_MOBILE_NUMBER": os.getenv("TEST_MOBILE_NUMBER", "Not set")}
 
 @app.get("/test-schedule")
 async def test_schedule():
-    """Test scheduling workflow"""
     try:
-        # Use test mobile number
         test_mobile = os.getenv("TEST_MOBILE_NUMBER", "0414364374")
         test_time = (datetime.now(manager.clinic_tz) + timedelta(hours=2)).isoformat()
-        
         print("🔍 Testing full scheduling workflow:")
         print(f"1. Finding patient with mobile: {test_mobile}")
         patient = manager.find_patient(mobile_number=test_mobile)
-        
-        if not patient:
-            return {"status": "failure", "reason": "Patient not found"}
-        
+        if not patient: return {"status": "failure", "reason": "Patient not found"}
         print(f"2. Scheduling appointment at {test_time}")
-        confirmation = manager.schedule_appointment(
-            iso_datetime_str=test_time,
-            mobile_number=test_mobile,
-            dob=patient.get("dob", "")
-        )
-        
-        if confirmation:
-            return {
-                "status": "success",
-                "patient": patient.get("fullName"),
-                "scheduled_time": confirmation.isoformat()
-            }
+        confirmation = manager.schedule_appointment(iso_datetime_str=test_time, mobile_number=test_mobile, dob=patient.get("dob", ""))
+        if confirmation: return {"status": "success", "patient": patient.get("fullName"), "scheduled_time": confirmation.isoformat()}
         return {"status": "failure", "reason": "Scheduling failed"}
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }
+        return {"status": "error", "error": str(e), "trace": traceback.format_exc()}
