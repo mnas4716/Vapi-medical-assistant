@@ -1,21 +1,22 @@
-# main.py (Corrected and Finalized)
+# main.py (Corrected with Standardized String Returns)
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse # Import PlainTextResponse
 from dotenv import load_dotenv
 import os
 import traceback
+import hmac
+import hashlib
 from datetime import datetime, timedelta
 
-# This must match the class name in your clinic_manager.py
 from clinic_manager import ClinicManager
 
-# Load environment variables for local testing
+# Load environment variables
 load_dotenv()
 
 app = FastAPI()
 
-# Initialize ClinicManager once when the application starts
+# Initialize ClinicManager
 print("\n" + "="*50)
 print("🚀 Initializing ClinicManager...")
 try:
@@ -31,24 +32,13 @@ print("="*50)
 
 @app.get("/")
 async def root():
-    """Health check endpoint to confirm the API is live."""
     return {"status": "active", "service": "FreeDoc Medical Assistant API"}
 
 
-# === Main Vapi Function Call Endpoint ===
 @app.post("/")
 async def vapi_webhook(request: Request):
-    """
-    This is the simple "traffic cop" endpoint. It receives a function call from
-    Vapi and routes it to the correct method in the ClinicManager.
-    """
-    # NOTE: Security check is commented out for development/debugging.
-    # UNCOMMENT FOR PRODUCTION.
-    # import hmac
-    # import hashlib
-    # secret = os.getenv("VAPI_SECRET_KEY")
-    # if secret:
-    #     ... (full HMAC security block goes here) ...
+    # Note: Security check is commented out for development
+    # try...except blocks for payload parsing...
 
     try:
         payload = await request.json()
@@ -58,7 +48,7 @@ async def vapi_webhook(request: Request):
 
     message = payload.get("message")
     if not message or message.get("type") != "function-call":
-        return {"status": "ignored", "reason": "non-function-call"}
+        return JSONResponse(content={"status": "ignored", "reason": "non-function-call"})
 
     function_call = message.get("functionCall", {})
     fn = function_call.get("name")
@@ -70,64 +60,41 @@ async def vapi_webhook(request: Request):
     print("="*50)
     
     try:
-        # --- START: CORRECTED AND SIMPLIFIED ROUTING LOGIC ---
+        # --- START: CORRECTED RETURN LOGIC ---
         if fn == "findPatient":
-            patient = manager.find_patient(
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
-            result = {"patientName": patient.get("fullName", "").split()[0] if patient else "Not Found"}
+            patient = manager.find_patient(mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
+            # Return a simple string, which the AI will use to get the first name.
+            return PlainTextResponse(content=patient.get("fullName") if patient else "Not Found")
         
         elif fn == "registerNewPatient":
-            # This tool is now simple and only does one thing.
             status = manager.register_patient(params)
-            result = {"status": "Success" if status else "Failure"}
+            return PlainTextResponse(content="Success" if status else "Failure")
 
         elif fn == "checkAvailability":
             availability = manager.check_availability(params.get("dateTime"))
-            result = {"result": availability}
+            # This already returns a string ("AVAILABLE" or "Suggestions: ..."), which is perfect.
+            return PlainTextResponse(content=availability)
             
         elif fn == "scheduleAppointment":
-            # This tool now correctly assumes the patient has already been verified
-            # by the Vapi prompt's logic flow. No need for extra checks here.
-            confirmation = manager.schedule_appointment(
-                iso_datetime_str=params.get("dateTime"),
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
-            if confirmation:
-                result = {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p")}
-            else:
-                result = {"status": "Failure"} # Simplified error
+            confirmation = manager.schedule_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
+            # Return the confirmation time directly as a string.
+            return PlainTextResponse(content=confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure")
                 
         elif fn == "cancelAppointment":
-            cancelled = manager.cancel_appointment(
-                iso_datetime_str=params.get("dateTime"),
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
-            result = {"status": "Success" if cancelled else "Not Found"}
+            cancelled = manager.cancel_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
+            return PlainTextResponse(content="Success" if cancelled else "Not Found")
             
         else:
             print(f"❌ Unknown function called: {fn}")
-            result = {"error": f"Unknown function name: {fn}"}
-        # --- END: CORRECTED AND SIMPLIFIED ROUTING LOGIC ---
-
-        print(f"✅ Function '{fn}' completed successfully.")
-        print(f"📤 Returning Result: {result}")
-        return result
+            return PlainTextResponse(content=f"Error: Unknown function name '{fn}'", status_code=400)
+        # --- END: CORRECTED RETURN LOGIC ---
         
     except Exception as e:
         print("\n❌❌❌ UNEXPECTED ERROR IN FUNCTION EXECUTION ❌❌❌")
-        print(f"Function that failed: {fn}")
-        print(f"Error Type: {type(e).__name__}")
-        print(f"Error Details: {str(e)}")
-        print("🔍 Traceback:")
         traceback.print_exc()
-        print("="*50)
-        return {"error": "An internal server error occurred while executing the function."}
+        return PlainTextResponse(content=f"Error: An internal server error occurred while executing {fn}.", status_code=500)
 
-# The rest of your file (diagnostic endpoints) is excellent and remains unchanged.
+# The rest of your file (diagnostic endpoints etc.) is excellent and remains unchanged.
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
@@ -151,15 +118,12 @@ async def test_calendar():
 
 @app.get("/env-check")
 async def env_check():
-    return {
-        "GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")),
-        "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")),
-        "SHEET_NAME": manager.sheet_name,
-        "TIME_ZONE": str(manager.clinic_tz)
-    }
+    # ... your existing env_check code ...
+    return {"GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")), "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")), "SHEET_NAME": manager.sheet_name, "TIME_ZONE": str(manager.clinic_tz)}
 
 @app.get("/test-schedule")
 async def test_schedule(mobile: str = "0414364374"):
+    # ... your existing test_schedule code ...
     try:
         test_time = (datetime.now(manager.clinic_tz) + timedelta(hours=2)).isoformat()
         patient = manager.find_patient(mobile_number=mobile)
