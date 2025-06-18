@@ -1,6 +1,8 @@
 # clinic_manager.py
 
 import os
+import json
+import base64
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -8,7 +10,7 @@ from datetime import datetime, timedelta
 
 # --- CONFIG ---
 SHEET_NAME = "WellnessGroveClinic_Patients"
-CALENDAR_ID = "primary"  # Or your full calendar email like xyz@project.iam.gserviceaccount.com
+CALENDAR_ID = os.getenv("CALENDAR_ID", "primary")
 APPOINTMENT_DURATION_MINUTES = 30
 CLINIC_OPEN_HOUR = 9
 CLINIC_CLOSE_HOUR = 17
@@ -23,7 +25,6 @@ def get_google_services():
     if not creds_json:
         raise ValueError("GOOGLE_CREDENTIALS_JSON environment variable not set.")
 
-    import json, base64
     creds_dict = json.loads(base64.b64decode(creds_json))
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 
@@ -44,12 +45,12 @@ def find_patient_in_sheet(dob, initials):
             else:
                 continue
             if patient.get('dob') == dob and patient_initials == initials.upper():
-                print(f"✅ Found patient: {patient.get('fullName')}")
+                print(f"\u2705 Found patient: {patient.get('fullName')}")
                 return patient
-        print("❌ Patient not found.")
+        print("\u274C Patient not found.")
         return None
     except Exception as e:
-        print(f"❌ Error finding patient in sheet: {e}")
+        print(f"\u274C Error finding patient in sheet: {e}")
         return None
 
 def register_patient_in_sheet(details):
@@ -59,10 +60,10 @@ def register_patient_in_sheet(details):
         headers = sheet.row_values(1)
         new_row = [details.get(h, '') for h in headers]
         sheet.append_row(new_row)
-        print(f"✅ Successfully registered: {details.get('fullName')}")
+        print(f"\u2705 Successfully registered: {details.get('fullName')}")
         return True
     except Exception as e:
-        print(f"❌ Error registering patient: {e}")
+        print(f"\u274C Error registering patient: {e}")
         return False
 
 def check_calendar_availability(iso_datetime_str):
@@ -83,7 +84,7 @@ def check_calendar_availability(iso_datetime_str):
         ).execute()
 
         if not events_result.get('items', []):
-            print(f"✅ Slot at {requested_time} is available.")
+            print(f"\u2705 Slot at {requested_time} is available.")
             return "AVAILABLE"
 
         suggestions = []
@@ -110,7 +111,7 @@ def check_calendar_availability(iso_datetime_str):
         else:
             return "I'm sorry, no free slots found later today."
     except Exception as e:
-        print(f"❌ Error checking calendar availability: {e}")
+        print(f"\u274C Error checking calendar availability: {e}")
         return "There was an error checking the calendar."
 
 def schedule_event_in_calendar(full_name, iso_datetime_str, reason):
@@ -127,10 +128,10 @@ def schedule_event_in_calendar(full_name, iso_datetime_str, reason):
         }
 
         calendar_service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
-        print(f"✅ Scheduled: {full_name} at {start_time}")
+        print(f"\u2705 Scheduled: {full_name} at {start_time}")
         return start_time
     except Exception as e:
-        print(f"❌ Error scheduling appointment: {e}")
+        print(f"\u274C Error scheduling appointment: {e}")
         return None
 
 def cancel_appointment_in_calendar(full_name, iso_datetime_str):
@@ -150,11 +151,12 @@ def cancel_appointment_in_calendar(full_name, iso_datetime_str):
         for event in events:
             if full_name.lower() in event.get('summary', '').lower():
                 calendar_service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
-                print(f"✅ Cancelled event for {full_name}")
+                print(f"\u2705 Cancelled event for {full_name}")
                 return True
 
-        print(f"❌ No matching event found for {full_name}")
+        print(f"\u274C No matching event found for {full_name}")
         return False
     except Exception as e:
-        print(f"❌ Error cancelling appointment: {e}")
+        print(f"\u274C Error cancelling appointment: {e}")
         return False
+        
