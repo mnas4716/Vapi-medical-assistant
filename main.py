@@ -5,8 +5,6 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 import traceback
-# import hmac  # --- Temporarily commented out for development
-# import hashlib # --- Temporarily commented out for development
 from datetime import datetime, timedelta
 
 from clinic_manager import ClinicManager
@@ -44,22 +42,6 @@ async def vapi_webhook(request: Request):
     Main endpoint for Vapi function calls
     Handles authentication and routes to appropriate functions
     """
-    # --- START: HMAC SECURITY BLOCK (TEMPORARILY COMMENTED OUT FOR DEV) ---
-    # secret = os.getenv("VAPI_SECRET_KEY")
-    # if secret:
-    #     signature = request.headers.get("x-vapi-signature")
-    #     if not signature:
-    #         print("❌ Security Error: Missing x-vapi-signature header")
-    #         raise HTTPException(status_code=401, detail="Missing signature")
-        
-    #     body = await request.body()
-    #     expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        
-    #     if not hmac.compare_digest(expected_signature, signature):
-    #         print("❌ Security Error: Invalid signature")
-    #         raise HTTPException(status_code=401, detail="Invalid signature")
-    # --- END: HMAC SECURITY BLOCK ---
-
     try:
         payload = await request.json()
     except Exception as e:
@@ -86,34 +68,72 @@ async def vapi_webhook(request: Request):
         if fn == "findPatient":
             patient = manager.find_patient(mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
             result = {"patientName": patient.get("fullName", "Not Found").split()[0] if patient else "Not Found"}
-            
+        
         elif fn == "registerNewPatient":
             status = manager.register_patient(params)
             result = {"status": "Success" if status else "Failure"}
-            
+
         elif fn == "checkAvailability":
             availability = manager.check_availability(params.get("dateTime"))
             result = {"result": availability}
-            
+
         elif fn == "scheduleAppointment":
-            confirmation = manager.schedule_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
-            if confirmation:
-                result = {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p")}
+            mobile_number = params.get("mobileNumber")
+            dob = params.get("dob")
+            iso_datetime = params.get("dateTime")
+            full_name = params.get("fullName")  # Only for new patient
+
+            patient = manager.find_patient(mobile_number=mobile_number, dob=dob)
+
+            if not patient:
+                # If no name provided yet, prompt for name
+                if not full_name:
+                    print("🆕 New patient: need full name")
+                    return {
+                        "status": "need_full_name",
+                        "message": "You're not registered. What is your full name?"
+                    }
+                else:
+                    # Register new patient then book appointment
+                    registered = manager.register_patient({
+                        "fullName": full_name,
+                        "dob": dob,
+                        "mobileNumber": mobile_number
+                    })
+                    if not registered:
+                        return {"status": "error", "message": "Could not register new patient. Please try again."}
+                    print("✅ Registered new patient:", full_name)
+                    # Proceed to booking
+                    confirmation = manager.schedule_appointment(iso_datetime, mobile_number, dob)
+                    if confirmation:
+                        return {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p")}
+                    else:
+                        return {"status": "Failure", "reason": "Scheduling failed"}
+
             else:
-                result = {"status": "Failure", "reason": "Scheduling failed"}
-                
+                # Patient exists, schedule appointment
+                confirmation = manager.schedule_appointment(iso_datetime, mobile_number, dob)
+                if confirmation:
+                    return {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p")}
+                else:
+                    return {"status": "Failure", "reason": "Scheduling failed"}
+
         elif fn == "cancelAppointment":
-            cancelled = manager.cancel_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
+            cancelled = manager.cancel_appointment(
+                iso_datetime_str=params.get("dateTime"),
+                mobile_number=params.get("mobileNumber"),
+                dob=params.get("dob")
+            )
             result = {"status": "Success" if cancelled else "Not Found"}
-            
+
         else:
             print(f"❌ Unknown function called: {fn}")
             result = {"error": f"Unknown function: {fn}"}
-        
+
         print(f"✅ Function completed: {fn}")
         print(f"📤 Result: {result}")
         return result
-        
+
     except Exception as e:
         print("\n❌❌❌ UNEXPECTED ERROR ❌❌❌")
         print(f"Error Type: {type(e).__name__}")
@@ -121,10 +141,9 @@ async def vapi_webhook(request: Request):
         print("🔍 Traceback:")
         traceback.print_exc()
         print("="*50)
-        
+
         return {"error": "Internal server error", "details": str(e), "function": fn}
 
-# The rest of your file (diagnostic endpoints etc.) is perfect and does not need to be changed.
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
