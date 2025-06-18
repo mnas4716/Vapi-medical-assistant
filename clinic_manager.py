@@ -32,21 +32,30 @@ def get_google_services():
     calendar_service = build('calendar', 'v3', credentials=creds)
     return sheets_service, calendar_service
 
-def find_patient_in_sheet(dob, initials):
+def find_patient_in_sheet(mobile_number=None, dob=None):
+    """
+    Look up patient by mobile number first. If not found, try DOB.
+    Returns the full row dict if found, else None.
+    """
     try:
         sheets_service, _ = get_google_services()
         sheet = sheets_service.open(SHEET_NAME).sheet1
         all_patients = sheet.get_all_records()
 
-        for patient in all_patients:
-            name_parts = patient.get('fullName', '').split(' ')
-            if len(name_parts) >= 2:
-                patient_initials = f"{name_parts[0][0]}{name_parts[-1][0]}".upper()
-            else:
-                continue
-            if patient.get('dob') == dob and patient_initials == initials.upper():
-                print(f"\u2705 Found patient: {patient.get('fullName')}")
-                return patient
+        # Try mobile number first
+        if mobile_number:
+            for patient in all_patients:
+                if str(patient.get("mobileNumber", "")).strip() == str(mobile_number).strip():
+                    print(f"\u2705 Found patient by mobile: {patient.get('fullName')}")
+                    return patient
+
+        # Fallback to DOB
+        if dob:
+            for patient in all_patients:
+                if patient.get("dob", "").strip() == str(dob).strip():
+                    print(f"\u2705 Found patient by DOB: {patient.get('fullName')}")
+                    return patient
+
         print("\u274C Patient not found.")
         return None
     except Exception as e:
@@ -159,4 +168,3 @@ def cancel_appointment_in_calendar(full_name, iso_datetime_str):
     except Exception as e:
         print(f"\u274C Error cancelling appointment: {e}")
         return False
-        
