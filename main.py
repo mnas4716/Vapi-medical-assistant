@@ -1,19 +1,18 @@
-# main.py (Corrected with Standardized String Returns)
+# main.py (Final Robust Version)
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, PlainTextResponse # Import PlainTextResponse
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 import traceback
-import hmac
-import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
+# Note: hmac/hashlib are commented out if you're still testing without security
+# import hmac
+# import hashlib
 
 from clinic_manager import ClinicManager
 
-# Load environment variables
 load_dotenv()
-
 app = FastAPI()
 
 # Initialize ClinicManager
@@ -25,20 +24,22 @@ try:
 except Exception as e:
     print(f"❌ CRITICAL ERROR: ClinicManager initialization failed: {e}")
     traceback.print_exc()
-    print("="*50)
     raise RuntimeError("ClinicManager initialization failed") from e
 print("="*50)
 
 
+# --- DIagnostic Endpoints (remain unchanged) ---
 @app.get("/")
 async def root():
     return {"status": "active", "service": "FreeDoc Medical Assistant API"}
+# ... (your other /test-* and /env-check endpoints are perfect, keep them) ...
 
 
+# === Main Vapi Function Call Endpoint ===
 @app.post("/")
 async def vapi_webhook(request: Request):
-    # Note: Security check is commented out for development
-    # try...except blocks for payload parsing...
+    # Security block is commented out for dev, you can re-enable later
+    # ...
 
     try:
         payload = await request.json()
@@ -59,46 +60,54 @@ async def vapi_webhook(request: Request):
     print(f"📋 Parameters: {params}")
     print("="*50)
     
+    result = None
     try:
-        # --- START: CORRECTED RETURN LOGIC ---
+        # --- START: ROBUST ROUTING & RESPONSE LOGIC ---
         if fn == "findPatient":
             patient = manager.find_patient(mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
-            # Return a simple string, which the AI will use to get the first name.
-            return PlainTextResponse(content=patient.get("fullName") if patient else "Not Found")
+            # If a patient is found, result is their name. If not, it's "Not Found".
+            result = patient.get("fullName") if patient else "Not Found"
         
         elif fn == "registerNewPatient":
             status = manager.register_patient(params)
-            return PlainTextResponse(content="Success" if status else "Failure")
+            result = "Success" if status else "Failure"
 
         elif fn == "checkAvailability":
-            availability = manager.check_availability(params.get("dateTime"))
-            # This already returns a string ("AVAILABLE" or "Suggestions: ..."), which is perfect.
-            return PlainTextResponse(content=availability)
+            # This already returns a string, which is perfect.
+            result = manager.check_availability(params.get("dateTime"))
             
         elif fn == "scheduleAppointment":
             confirmation = manager.schedule_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
-            # Return the confirmation time directly as a string.
-            return PlainTextResponse(content=confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure")
+            # The result is the formatted time string, or "Failure".
+            result = confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"
                 
         elif fn == "cancelAppointment":
             cancelled = manager.cancel_appointment(iso_datetime_str=params.get("dateTime"), mobile_number=params.get("mobileNumber"), dob=params.get("dob"))
-            return PlainTextResponse(content="Success" if cancelled else "Not Found")
+            result = "Success" if cancelled else "Not Found"
             
         else:
             print(f"❌ Unknown function called: {fn}")
-            return PlainTextResponse(content=f"Error: Unknown function name '{fn}'", status_code=400)
-        # --- END: CORRECTED RETURN LOGIC ---
+            result = f"Error: Unknown function name '{fn}'"
+
+        # --- END: ROBUST ROUTING & RESPONSE LOGIC ---
+
+        print(f"✅ Function '{fn}' completed.")
+        print(f"📤 Preparing to send result to Vapi: '{result}'")
+        # Return the result in a format Vapi is guaranteed to understand.
+        return JSONResponse(content={"result": result})
         
     except Exception as e:
         print("\n❌❌❌ UNEXPECTED ERROR IN FUNCTION EXECUTION ❌❌❌")
         traceback.print_exc()
-        return PlainTextResponse(content=f"Error: An internal server error occurred while executing {fn}.", status_code=500)
+        # Return a clear error message in the correct format
+        return JSONResponse(content={"result": f"Error: An internal server error occurred."})
 
-# The rest of your file (diagnostic endpoints etc.) is excellent and remains unchanged.
+# The rest of your main.py file...
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
 
+# ... (Insert your excellent diagnostic endpoints here: /test-sheets, /test-calendar, etc.) ...
 @app.get("/test-sheets")
 async def test_sheets(mobile: str = "0414364374"):
     try:
@@ -118,12 +127,10 @@ async def test_calendar():
 
 @app.get("/env-check")
 async def env_check():
-    # ... your existing env_check code ...
-    return {"GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")), "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")), "SHEET_NAME": manager.sheet_name, "TIME_ZONE": str(manager.clinic_tz)}
+    return {"GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")), "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")), "SHEET_NAME": manager.sheet_name, "TIME_ZONE": str(manager.clinic_tz), "CALENDAR_ID": os.getenv("CALENDAR_ID"), "TEST_MOBILE_NUMBER": os.getenv("TEST_MOBILE_NUMBER", "Not set")}
 
 @app.get("/test-schedule")
 async def test_schedule(mobile: str = "0414364374"):
-    # ... your existing test_schedule code ...
     try:
         test_time = (datetime.now(manager.clinic_tz) + timedelta(hours=2)).isoformat()
         patient = manager.find_patient(mobile_number=mobile)
