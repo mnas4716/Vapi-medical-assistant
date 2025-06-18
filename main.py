@@ -3,131 +3,233 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
 import traceback
+import hmac
+import hashlib
+from datetime import datetime, timedelta
 
-# Import your manager class or direct functions
 from clinic_manager import ClinicManager
-# If you want to support direct function calls as fallback:
-# from clinic_manager import (
-#     find_patient_in_sheet,
-#     register_patient_in_sheet,
-#     check_calendar_availability,
-#     schedule_event_in_calendar,
-#     cancel_appointment_in_calendar
-# )
 
+# Load environment variables
 load_dotenv()
 
 app = FastAPI()
 
+# Initialize ClinicManager
+print("\n" + "="*50)
 print("🚀 Initializing ClinicManager...")
-manager = ClinicManager()
-print("✅ ClinicManager is ready.")
+try:
+    manager = ClinicManager()
+    print("✅ ClinicManager initialized successfully")
+except Exception as e:
+    print(f"❌ CRITICAL ERROR: ClinicManager initialization failed: {e}")
+    print("Application cannot start without Google services")
+    print("="*50)
+    raise RuntimeError("ClinicManager initialization failed") from e
+print("="*50)
 
 @app.get("/")
 async def root():
-    return {"message": "API is live and running."}
+    """Health check endpoint"""
+    return {
+        "status": "active",
+        "service": "Medical Assistant API",
+        "timestamp": datetime.now().isoformat()
+    }
 
-# === Main Vapi Function Call Endpoint ===
 @app.post("/")
 async def vapi_webhook(request: Request):
-    print("\n--- Incoming request ---")
-    # === Security Block (toggle on/off as needed) ===
+    """
+    Main endpoint for Vapi function calls
+    Handles authentication and routes to appropriate functions
+    """
+    # HMAC security verification
     secret = os.getenv("VAPI_SECRET_KEY")
-    incoming = request.headers.get("x-vapi-secret")
-    print("Headers:", dict(request.headers))
-    if secret and incoming != secret:
-        print("❌ Secret mismatch!")
-        raise HTTPException(status_code=403, detail="Forbidden: invalid secret")
+    if secret:
+        signature = request.headers.get("x-vapi-signature")
+        if not signature:
+            print("❌ Security Error: Missing x-vapi-signature header")
+            raise HTTPException(status_code=401, detail="Missing signature")
+        
+        body = await request.body()
+        expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        
+        if not hmac.compare_digest(expected_signature, signature):
+            print("❌ Security Error: Invalid signature")
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # === Robust JSON Body Parsing ===
     try:
         payload = await request.json()
-        print("Payload:", payload)
     except Exception as e:
-        print("❌ JSON decode error:", str(e))
-        return JSONResponse(status_code=400, content={"error": str(e)})
+        print(f"❌ JSON parsing error: {e}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Invalid JSON: {str(e)}"}
+        )
 
     message = payload.get("message")
-    print("Message:", message)
     if not message or message.get("type") != "function-call":
-        print("❌ Ignored non-function-call")
-        return {"message": "Ignored non-function-call"}
+        print("⚠️ Ignored non-function-call message")
+        return {"status": "ignored", "reason": "non-function-call"}
 
-    fn = message.get("functionCall", {}).get("name")
-    params = message.get("functionCall", {}).get("parameters", {})
-    ctx = message.get("context", {})
-
-    print("Function:", fn)
-    print("Parameters:", params)
-    print("Context:", ctx)
-
-    # === MAIN FUNCTION ROUTING ===
+    # Extract function details
+    function_call = message.get("functionCall", {})
+    fn = function_call.get("name")
+    params = function_call.get("parameters", {})
+    
+    print("\n" + "="*50)
+    print(f"📞 VAPI FUNCTION CALL: {fn}")
+    print(f"📋 Parameters: {params}")
+    print("="*50)
+    
     try:
-        # Use ClinicManager object for all logic
+        # Route to appropriate function
         if fn == "findPatient":
             patient = manager.find_patient(
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
-            result = {"patientName": patient.get("fullName").split(" ")[0] if patient else "Not Found"}
-            print(f"➡️ Returning result: {result}")
-            return result
-
-        if fn == "registerNewPatient":
+            result = {"patientName": patient.get("fullName", "Not Found").split()[0] if patient else "Not Found"}
+            
+        elif fn == "registerNewPatient":
             status = manager.register_patient(params)
             result = {"status": "Success" if status else "Failure"}
-            print(f"➡️ Returning result: {result}")
-            return result
-
-        if fn == "checkAvailability":
+            
+        elif fn == "checkAvailability":
             availability = manager.check_availability(params.get("dateTime"))
             result = {"result": availability}
-            print(f"➡️ Returning result: {result}")
-            return result
-
-        if fn == "scheduleAppointment":
+            
+        elif fn == "scheduleAppointment":
             confirmation = manager.schedule_appointment(
                 iso_datetime_str=params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
-            result = {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"}
-            print(f"➡️ Returning result: {result}")
-            return result
-
-        if fn == "cancelAppointment":
+            if confirmation:
+                result = {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p")}
+            else:
+                result = {"status": "Failure", "reason": "Scheduling failed"}
+                
+        elif fn == "cancelAppointment":
             cancelled = manager.cancel_appointment(
                 iso_datetime_str=params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
             result = {"status": "Success" if cancelled else "Not Found"}
-            print(f"➡️ Returning result: {result}")
-            return result
-
-        print(f"❌ Unknown function called: {fn}")
-        return {"error": f"Unknown function: {fn}"}
-
+            
+        else:
+            print(f"❌ Unknown function called: {fn}")
+            result = {"error": f"Unknown function: {fn}"}
+        
+        print(f"✅ Function completed: {fn}")
+        print(f"📤 Result: {result}")
+        return result
+        
     except Exception as e:
-        print("\n❌❌❌ AN UNEXPECTED ERROR OCCURRED ❌❌❌")
+        print("\n❌❌❌ UNEXPECTED ERROR ❌❌❌")
         print(f"Error Type: {type(e).__name__}")
         print(f"Error Details: {str(e)}")
-        print("--- Full Traceback ---")
+        print("🔍 Traceback:")
         traceback.print_exc()
-        print("----------------------\n")
-        return {"error": f"An internal server error occurred."}
+        print("="*50)
+        
+        return {
+            "error": "Internal server error",
+            "details": str(e),
+            "function": fn
+        }
 
-# === Optional: /agent endpoint for Vapi (same logic as "/") ===
+# Support Vapi's /agent endpoint
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
 
-# === Catch-All for Vapi Webhooks (empty-body safe) ===
-@app.post("/webhooks/{path:path}")
-async def generic_webhook_handler(path: str, request: Request):
+# ======================
+# DIAGNOSTIC ENDPOINTS
+# ======================
+@app.get("/test-sheets")
+async def test_sheets(mobile: str = "0414364374"):
+    """Test Google Sheets integration"""
     try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    print(f"ℹ️ Received webhook on '/webhooks/{path}': {data}")
-    return {"status": "received"}
+        print(f"🔍 Testing Sheets with mobile: {mobile}")
+        patient = manager.find_patient(mobile_number=mobile)
+        return {
+            "status": "success" if patient else "failure",
+            "patient_found": bool(patient),
+            "patient_name": patient.get("fullName") if patient else None
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }
+
+@app.get("/test-calendar")
+async def test_calendar():
+    """Test Google Calendar integration"""
+    try:
+        # Create test time (next hour)
+        test_time = (datetime.now(manager.clinic_tz) + timedelta(hours=1)).isoformat()
+        print(f"🔍 Testing Calendar with time: {test_time}")
+        
+        availability = manager.check_availability(test_time)
+        return {
+            "status": "success",
+            "test_time": test_time,
+            "availability": availability
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }
+
+@app.get("/env-check")
+async def env_check():
+    """Verify environment variables are set"""
+    return {
+        "GOOGLE_CREDENTIALS_SET": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")),
+        "CALENDAR_ID": os.getenv("CALENDAR_ID"),
+        "VAPI_SECRET_SET": bool(os.getenv("VAPI_SECRET_KEY")),
+        "SHEET_NAME": manager.sheet_name,
+        "TIME_ZONE": str(manager.clinic_tz),
+        "TEST_MOBILE_NUMBER": os.getenv("TEST_MOBILE_NUMBER", "Not set")
+    }
+
+@app.get("/test-schedule")
+async def test_schedule():
+    """Test scheduling workflow"""
+    try:
+        # Use test mobile number
+        test_mobile = os.getenv("TEST_MOBILE_NUMBER", "0414364374")
+        test_time = (datetime.now(manager.clinic_tz) + timedelta(hours=2)).isoformat()
+        
+        print("🔍 Testing full scheduling workflow:")
+        print(f"1. Finding patient with mobile: {test_mobile}")
+        patient = manager.find_patient(mobile_number=test_mobile)
+        
+        if not patient:
+            return {"status": "failure", "reason": "Patient not found"}
+        
+        print(f"2. Scheduling appointment at {test_time}")
+        confirmation = manager.schedule_appointment(
+            iso_datetime_str=test_time,
+            mobile_number=test_mobile,
+            dob=patient.get("dob", "")
+        )
+        
+        if confirmation:
+            return {
+                "status": "success",
+                "patient": patient.get("fullName"),
+                "scheduled_time": confirmation.isoformat()
+            }
+        return {"status": "failure", "reason": "Scheduling failed"}
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }
