@@ -18,6 +18,7 @@ app = FastAPI()
 async def root():
     return {"message": "API is live"}
 
+# === Main Vapi Function Call Endpoint ===
 @app.post("/")
 async def vapi_webhook(request: Request):
     secret = os.getenv("VAPI_SECRET_KEY")
@@ -68,7 +69,6 @@ async def vapi_webhook(request: Request):
         return {"error": f"Exception: {str(e)}"}
 
 # === Vapi Webhook Endpoints ===
-
 @app.post("/webhooks/status-update")
 async def status_update(request: Request):
     data = await request.json()
