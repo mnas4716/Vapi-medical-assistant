@@ -41,8 +41,11 @@ async def vapi_webhook(request: Request):
 
     try:
         if fn == "findPatient":
-            patient = find_patient_in_sheet(params.get("dob"), params.get("initials"))
-            return {"patientName": patient.get("fullName").split(" ")[0] if patient else "Not Found"}
+            patient = find_patient_in_sheet(
+                mobile_number=params.get("mobileNumber"),
+                dob=params.get("dob")
+            )
+            return {"patientName": patient.get("fullName") if patient else "Not Found"}
 
         if fn == "registerNewPatient":
             status = register_patient_in_sheet(params)
@@ -53,14 +56,22 @@ async def vapi_webhook(request: Request):
             return {"result": availability}
 
         if fn == "scheduleAppointment":
-            name = params.get("fullName") or ctx.get("patientName")
-            time = params.get("dateTime")
-            reason = params.get("reason")
-            confirmation = schedule_event_in_calendar(name, time, reason)
+            confirmation = schedule_event_in_calendar(
+                mobile_number=params.get("mobileNumber"),
+                dob=params.get("dob"),
+                full_name=params.get("fullName") or ctx.get("patientName"),
+                iso_datetime_str=params.get("dateTime"),
+                reason=params.get("reason")
+            )
             return {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"}
 
         if fn == "cancelAppointment":
-            cancelled = cancel_appointment_in_calendar(params.get("fullName"), params.get("dateTime"))
+            cancelled = cancel_appointment_in_calendar(
+                mobile_number=params.get("mobileNumber"),
+                dob=params.get("dob"),
+                full_name=params.get("fullName") or ctx.get("patientName"),
+                iso_datetime_str=params.get("dateTime")
+            )
             return {"status": "Success" if cancelled else "Not Found"}
 
         return {"error": f"Unknown function: {fn}"}
