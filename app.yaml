@@ -6,6 +6,6 @@ instance_class: F1
 env_variables:
   GOOGLE_APPLICATION_CREDENTIALS: "credentials.json"
 
-handlers:
-  - url: /.*
-    script: auto
+automatic_scaling:
+  max_instances: 3
+  min_instances: 1
