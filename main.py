@@ -8,25 +8,18 @@ import hmac
 import hashlib
 import traceback
 
-# --- 1. IMPORT THE CLASS, NOT THE INDIVIDUAL FUNCTIONS ---
 from clinic_manager import ClinicManager
 
-# Load environment variables from a .env file for local testing
 load_dotenv()
 
-# Initialize the FastAPI application
 app = FastAPI()
 
-# --- 2. CREATE A SINGLE, SHARED INSTANCE OF THE MANAGER ---
-# This happens once when your application starts up.
 print("🚀 Initializing ClinicManager...")
 manager = ClinicManager()
 print("✅ ClinicManager is ready.")
 
-
 @app.get("/")
 async def root():
-    """A simple endpoint to confirm the API is live."""
     return {"message": "API is live and running."}
 
 # === Main Vapi Function Call Endpoint ===
@@ -36,21 +29,21 @@ async def vapi_webhook(request: Request):
     This is the primary endpoint that handles all function calls from Vapi.
     It includes security verification and routes requests to the correct function.
     """
-    
-    # Security Check: HMAC Signature Verification
-    secret = os.getenv("VAPI_SECRET_KEY")
-    if secret:
-        signature = request.headers.get("x-vapi-signature")
-        if not signature:
-            print("❌ Security Error: Missing x-vapi-signature header.")
-            raise HTTPException(status_code=401, detail="Missing signature")
-        
-        body = await request.body()
-        expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        
-        if not hmac.compare_digest(expected_signature, signature):
-            print("❌ Security Error: Invalid signature.")
-            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # HMAC Security Block -- COMMENTED OUT FOR TESTING/DEV
+    # secret = os.getenv("VAPI_SECRET_KEY")
+    # if secret:
+    #     signature = request.headers.get("x-vapi-signature")
+    #     if not signature:
+    #         print("❌ Security Error: Missing x-vapi-signature header.")
+    #         raise HTTPException(status_code=401, detail="Missing signature")
+    #
+    #     body = await request.body()
+    #     expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    #
+    #     if not hmac.compare_digest(expected_signature, signature):
+    #         print("❌ Security Error: Invalid signature.")
+    #         raise HTTPException(status_code=401, detail="Invalid signature")
 
     # Payload Processing
     try:
@@ -65,7 +58,7 @@ async def vapi_webhook(request: Request):
 
     fn = message.get("functionCall", {}).get("name")
     params = message.get("functionCall", {}).get("parameters", {})
-    
+
     print("\n--- Vapi Function Call Received ---")
     print(f"✅ Function Name: {fn}")
     print(f"✅ Parameters: {params}")
@@ -73,7 +66,6 @@ async def vapi_webhook(request: Request):
     # Function Routing
     try:
         if fn == "findPatient":
-            # --- 3. UPDATED TO USE THE MANAGER INSTANCE ---
             patient = manager.find_patient(
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
