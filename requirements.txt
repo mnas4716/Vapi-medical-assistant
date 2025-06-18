@@ -1,27 +1,20 @@
 # requirements.txt
 
-# --- Core Web Server ---
-# fastapi for the web framework itself.
-# uvicorn is the high-performance server that runs the app.
-# python-multipart is required by FastAPI for handling form data.
+# Core Web Server & Framework
 fastapi
 uvicorn
 python-multipart
 
-# --- Google API Libraries ---
-# The complete set for interacting with Google Sheets and Calendar.
+# Google API Libraries
 google-api-python-client
 google-auth-oauthlib
 google-auth
 
-# --- Google Sheets Specific Helper ---
-# For easily interacting with Google Sheets (reading/writing rows).
+# Google Sheets Helper
 gspread
 
-# --- Timezone Handling (CRITICAL NEW DEPENDENCY) ---
-# For making all date and time operations timezone-aware.
+# Timezone Handling
 pytz
 
-# --- For local testing with a .env file ---
-# This loads your secret keys from a .env file when you run it on your own computer.
+# Environment Variable Loader (for local testing)
 python-dotenv
