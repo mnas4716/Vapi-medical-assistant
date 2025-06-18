@@ -20,7 +20,7 @@ def get_google_services():
         "https://www.googleapis.com/auth/calendar"
     ]
 
-    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "credentials.json")
     if not creds_path:
         raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set.")
     
