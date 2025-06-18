@@ -1,11 +1,7 @@
-# main.py
-
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import os
-import hmac
-import hashlib
 import traceback
 
 from clinic_manager import ClinicManager
@@ -26,10 +22,8 @@ async def root():
 @app.post("/")
 async def vapi_webhook(request: Request):
     """
-    This is the primary endpoint that handles all function calls from Vapi.
-    It includes security verification and routes requests to the correct function.
+    Handles all function calls from Vapi, routing to the correct manager method.
     """
-
     # HMAC Security Block -- COMMENTED OUT FOR TESTING/DEV
     # secret = os.getenv("VAPI_SECRET_KEY")
     # if secret:
@@ -37,15 +31,12 @@ async def vapi_webhook(request: Request):
     #     if not signature:
     #         print("❌ Security Error: Missing x-vapi-signature header.")
     #         raise HTTPException(status_code=401, detail="Missing signature")
-    #
     #     body = await request.body()
     #     expected_signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    #
     #     if not hmac.compare_digest(expected_signature, signature):
     #         print("❌ Security Error: Invalid signature.")
     #         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Payload Processing
     try:
         payload = await request.json()
     except Exception as e:
@@ -63,7 +54,6 @@ async def vapi_webhook(request: Request):
     print(f"✅ Function Name: {fn}")
     print(f"✅ Parameters: {params}")
 
-    # Function Routing
     try:
         if fn == "findPatient":
             patient = manager.find_patient(
@@ -118,12 +108,10 @@ async def vapi_webhook(request: Request):
         print("----------------------\n")
         return {"error": f"An internal server error occurred."}
 
-# === Optional: /agent endpoint for Vapi ===
 @app.post("/agent")
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
 
-# === Vapi Webhook Catch-All for Logging ===
 @app.post("/webhooks/{path:path}")
 async def generic_webhook_handler(path: str, request: Request):
     try:
