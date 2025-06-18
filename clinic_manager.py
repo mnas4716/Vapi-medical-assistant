@@ -1,3 +1,5 @@
+# clinic_manager.py
+
 import os
 import json
 import base64
@@ -28,6 +30,7 @@ def get_google_services():
     return sheets_service, calendar_service
 
 def find_patient_in_sheet(mobile_number=None, dob=None):
+    """Looks for a patient by mobile number (prefer) or by DOB. Returns dict if found, else None."""
     try:
         sheets_service, _ = get_google_services()
         sheet = sheets_service.open(SHEET_NAME).sheet1
@@ -64,7 +67,8 @@ def register_patient_in_sheet(details):
         print(f"\u274C Error registering patient: {e}")
         return False
 
-def check_calendar_availability(iso_datetime_str):
+def check_calendar_availability(iso_datetime_str, mobile_number=None, dob=None):
+    """Check if a slot is available for a specific patient (if you want to filter per patient; else you can ignore the patient lookup here)"""
     try:
         _, calendar_service = get_google_services()
         requested_time = datetime.fromisoformat(iso_datetime_str)
@@ -112,52 +116,38 @@ def check_calendar_availability(iso_datetime_str):
         print(f"\u274C Error checking calendar availability: {e}")
         return "There was an error checking the calendar."
 
-def schedule_event_in_calendar(mobile_number=None, dob=None, full_name=None, iso_datetime_str=None, reason=None):
+def schedule_event_in_calendar(iso_datetime_str, reason, mobile_number=None, dob=None):
+    """Looks up patient, schedules event if found, returns start_time or None."""
     try:
-        # Try to look up patient details if not given
-        patient = None
-        if not full_name and (mobile_number or dob):
-            patient = find_patient_in_sheet(mobile_number, dob)
-            if patient:
-                full_name = patient.get('fullName')
-        elif full_name:
-            patient = {"fullName": full_name}
-
-        if not (full_name and iso_datetime_str):
+        patient = find_patient_in_sheet(mobile_number=mobile_number, dob=dob)
+        if not patient:
+            print("\u274C No patient found for scheduling.")
             return None
-
         _, calendar_service = get_google_services()
         start_time = datetime.fromisoformat(iso_datetime_str)
         end_time = start_time + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)
 
         event = {
-            'summary': f'Appointment: {full_name}',
+            'summary': f'Appointment: {patient.get("fullName", "Unknown")}',
             'description': f'Reason: {reason}',
             'start': {'dateTime': start_time.isoformat(), 'timeZone': 'UTC'},
             'end': {'dateTime': end_time.isoformat(), 'timeZone': 'UTC'},
         }
 
         calendar_service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
-        print(f"\u2705 Scheduled: {full_name} at {start_time}")
+        print(f"\u2705 Scheduled: {patient.get('fullName', 'Unknown')} at {start_time}")
         return start_time
     except Exception as e:
         print(f"\u274C Error scheduling appointment: {e}")
         return None
 
-def cancel_appointment_in_calendar(mobile_number=None, dob=None, full_name=None, iso_datetime_str=None):
+def cancel_appointment_in_calendar(iso_datetime_str, mobile_number=None, dob=None):
+    """Finds patient, then cancels appointment if found."""
     try:
-        # Try to look up patient details if not given
-        patient = None
-        if not full_name and (mobile_number or dob):
-            patient = find_patient_in_sheet(mobile_number, dob)
-            if patient:
-                full_name = patient.get('fullName')
-        elif full_name:
-            patient = {"fullName": full_name}
-
-        if not (full_name and iso_datetime_str):
+        patient = find_patient_in_sheet(mobile_number=mobile_number, dob=dob)
+        if not patient:
+            print("\u274C No patient found for cancellation.")
             return False
-
         _, calendar_service = get_google_services()
         target_time = datetime.fromisoformat(iso_datetime_str)
         time_min = target_time.isoformat() + 'Z'
@@ -171,12 +161,12 @@ def cancel_appointment_in_calendar(mobile_number=None, dob=None, full_name=None,
         ).execute().get('items', [])
 
         for event in events:
-            if full_name.lower() in event.get('summary', '').lower():
+            if patient.get("fullName", "").lower() in event.get('summary', '').lower():
                 calendar_service.events().delete(calendarId=CALENDAR_ID, eventId=event['id']).execute()
-                print(f"\u2705 Cancelled event for {full_name}")
+                print(f"\u2705 Cancelled event for {patient.get('fullName', 'Unknown')}")
                 return True
 
-        print(f"\u274C No matching event found for {full_name}")
+        print(f"\u274C No matching event found for {patient.get('fullName', 'Unknown')}")
         return False
     except Exception as e:
         print(f"\u274C Error cancelling appointment: {e}")
