@@ -1,5 +1,3 @@
-# clinic_manager.py
-
 import os
 import json
 import base64
@@ -20,43 +18,34 @@ def get_google_services():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/calendar"
     ]
-
     creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if not creds_json:
         raise ValueError("GOOGLE_CREDENTIALS_JSON environment variable not set.")
-
     creds_dict = json.loads(base64.b64decode(creds_json))
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-
     sheets_service = gspread.authorize(creds)
     calendar_service = build('calendar', 'v3', credentials=creds)
     return sheets_service, calendar_service
 
 def find_patient_in_sheet(mobile_number=None, dob=None):
-    """
-    Look up patient by mobile number first. If not found, try DOB.
-    Returns the full row dict if found, else None.
-    """
     try:
         sheets_service, _ = get_google_services()
         sheet = sheets_service.open(SHEET_NAME).sheet1
         all_patients = sheet.get_all_records()
 
-        # Try mobile number first
         if mobile_number:
             for patient in all_patients:
-                if str(patient.get("mobileNumber", "")).strip() == str(mobile_number).strip():
+                if str(patient.get('mobileNumber', '')).strip() == str(mobile_number).strip():
                     print(f"\u2705 Found patient by mobile: {patient.get('fullName')}")
                     return patient
 
-        # Fallback to DOB
         if dob:
             for patient in all_patients:
-                if patient.get("dob", "").strip() == str(dob).strip():
+                if str(patient.get('dob', '')).strip() == str(dob).strip():
                     print(f"\u2705 Found patient by DOB: {patient.get('fullName')}")
                     return patient
 
-        print("\u274C Patient not found.")
+        print("\u274C Patient not found by mobile or DOB.")
         return None
     except Exception as e:
         print(f"\u274C Error finding patient in sheet: {e}")
@@ -123,8 +112,20 @@ def check_calendar_availability(iso_datetime_str):
         print(f"\u274C Error checking calendar availability: {e}")
         return "There was an error checking the calendar."
 
-def schedule_event_in_calendar(full_name, iso_datetime_str, reason):
+def schedule_event_in_calendar(mobile_number=None, dob=None, full_name=None, iso_datetime_str=None, reason=None):
     try:
+        # Try to look up patient details if not given
+        patient = None
+        if not full_name and (mobile_number or dob):
+            patient = find_patient_in_sheet(mobile_number, dob)
+            if patient:
+                full_name = patient.get('fullName')
+        elif full_name:
+            patient = {"fullName": full_name}
+
+        if not (full_name and iso_datetime_str):
+            return None
+
         _, calendar_service = get_google_services()
         start_time = datetime.fromisoformat(iso_datetime_str)
         end_time = start_time + timedelta(minutes=APPOINTMENT_DURATION_MINUTES)
@@ -143,8 +144,20 @@ def schedule_event_in_calendar(full_name, iso_datetime_str, reason):
         print(f"\u274C Error scheduling appointment: {e}")
         return None
 
-def cancel_appointment_in_calendar(full_name, iso_datetime_str):
+def cancel_appointment_in_calendar(mobile_number=None, dob=None, full_name=None, iso_datetime_str=None):
     try:
+        # Try to look up patient details if not given
+        patient = None
+        if not full_name and (mobile_number or dob):
+            patient = find_patient_in_sheet(mobile_number, dob)
+            if patient:
+                full_name = patient.get('fullName')
+        elif full_name:
+            patient = {"fullName": full_name}
+
+        if not (full_name and iso_datetime_str):
+            return False
+
         _, calendar_service = get_google_services()
         target_time = datetime.fromisoformat(iso_datetime_str)
         time_min = target_time.isoformat() + 'Z'
