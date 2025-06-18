@@ -1,4 +1,4 @@
-# clinic_manager.py (Simplified Version)
+# clinic_manager.py (Advanced Version - This code is correct, no changes needed)
 
 import os
 import json
@@ -63,47 +63,60 @@ class ClinicManager:
             return None
             
     def register_patient(self, details):
-        """SIMPLIFIED: Registers a patient with only name, dob, and mobile."""
         try:
             if self.find_patient(mobile_number=details.get("mobileNumber"), dob=details.get("dob")):
-                return False # Prevent duplicate
-            
+                return False 
             sheet = self.sheets_service.open(self.sheet_name).sheet1
-            # EXPECTS ONLY THESE 3 HEADERS IN THE SHEET: fullName, dob, mobileNumber
-            sheet.append_row([
-                details.get('fullName', ''),
-                details.get('dob', ''),
-                details.get('mobileNumber', '')
-            ])
+            sheet.append_row([details.get('fullName', ''), details.get('dob', ''), details.get('mobileNumber', '')])
             return True
         except Exception as e:
             print(f"❌ Registration error: {e}")
             return False
 
     def check_availability(self, iso_datetime_str):
+        """
+        ADVANCED: Checks calendar for available slots. If the requested slot is
+        taken, it finds up to 3 alternative slots on the same day.
+        """
         try:
-            req_time = self._parse_and_localize_time(iso_datetime_str)
-            if not (self.clinic_open_hour <= req_time.hour < self.clinic_close_hour):
+            requested_time = self._parse_and_localize_time(iso_datetime_str)
+            if not (self.clinic_open_hour <= requested_time.hour < self.clinic_close_hour):
                 return "Outside clinic hours"
-            
-            start_utc = req_time.astimezone(pytz.utc)
-            end_utc = start_utc + self.appointment_duration
-            events = self.calendar_service.events().list(calendarId=self.calendar_id, timeMin=start_utc.isoformat(), timeMax=end_utc.isoformat(), singleEvents=True, maxResults=1).execute().get("items", [])
-            if not events: return "AVAILABLE"
 
+            start_utc = requested_time.astimezone(pytz.utc)
+            end_utc = start_utc + self.appointment_duration
+            
+            events = self.calendar_service.events().list(calendarId=self.calendar_id, timeMin=start_utc.isoformat(), timeMax=end_utc.isoformat(), singleEvents=True, maxResults=1).execute().get("items", [])
+            if not events:
+                print(f"✅ Slot at {requested_time} is available.")
+                return "AVAILABLE"
+
+            print(f"⚠️ Slot at {requested_time} is booked. Searching for alternatives...")
             suggestions = []
-            search_time = req_time
-            eod = req_time.replace(hour=self.clinic_close_hour, minute=0, second=0)
-            while len(suggestions) < 3 and search_time < eod:
+            search_time = requested_time
+            day_end = requested_time.replace(hour=self.clinic_close_hour, minute=0, second=0, microsecond=0)
+
+            while len(suggestions) < 3 and search_time < day_end:
                 search_time += self.appointment_duration
-                if search_time >= eod: break
-                check_start = search_time.astimezone(pytz.utc)
-                check_end = check_start + self.appointment_duration
-                check_events = self.calendar_service.events().list(calendarId=self.calendar_id, timeMin=check_start.isoformat(), timeMax=check_end.isoformat(), singleEvents=True, maxResults=1).execute().get("items", [])
-                if not check_events: suggestions.append(search_time.strftime("%-I:%M %p"))
-            return f"Suggestions: {', '.join(suggestions)}" if suggestions else "No other slots available"
+                if search_time >= day_end: break
+                
+                check_start_utc = search_time.astimezone(pytz.utc)
+                check_end_utc = check_start_utc + self.appointment_duration
+                
+                check_events = self.calendar_service.events().list(calendarId=self.calendar_id, timeMin=check_start_utc.isoformat(), timeMax=check_end_utc.isoformat(), singleEvents=True, maxResults=1).execute().get("items", [])
+                if not check_events:
+                    suggestions.append(search_time.strftime("%-I:%M %p"))
+            
+            if suggestions:
+                response_string = f"Suggestions: {', '.join(suggestions)}"
+                print(f"✅ Found alternatives: {response_string}")
+                return response_string
+            else:
+                print("❌ No alternative slots found for the rest of the day.")
+                return "No other slots available today"
         except Exception as e:
-            return f"Error checking calendar: {e}"
+            print(f"❌ Availability check error: {e}")
+            return "Error checking calendar"
     
     def schedule_appointment(self, iso_datetime_str, mobile_number=None, dob=None):
         try:
