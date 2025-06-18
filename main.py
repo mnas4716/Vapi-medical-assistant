@@ -52,25 +52,29 @@ async def vapi_webhook(request: Request):
             return {"status": "Success" if status else "Failure"}
 
         if fn == "checkAvailability":
-            availability = check_calendar_availability(params.get("dateTime"))
-            return {"result": availability}
+            result = check_calendar_availability(
+                params.get("dateTime"),
+                mobile_number=params.get("mobileNumber"),
+                dob=params.get("dob")
+            )
+            return {"result": result}
 
         if fn == "scheduleAppointment":
             confirmation = schedule_event_in_calendar(
+                params.get("dateTime"),
+                params.get("reason"),
                 mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob"),
-                full_name=params.get("fullName") or ctx.get("patientName"),
-                iso_datetime_str=params.get("dateTime"),
-                reason=params.get("reason")
+                dob=params.get("dob")
             )
-            return {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"}
+            return {
+                "confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"
+            }
 
         if fn == "cancelAppointment":
             cancelled = cancel_appointment_in_calendar(
+                params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob"),
-                full_name=params.get("fullName") or ctx.get("patientName"),
-                iso_datetime_str=params.get("dateTime")
+                dob=params.get("dob")
             )
             return {"status": "Success" if cancelled else "Not Found"}
 
