@@ -1,17 +1,15 @@
-# Node
-node_modules/
-npm-debug.log
+# .gitignore
 
-# Python
+# Ignore Python's cache files
 __pycache__/
 *.pyc
 
-# Secrets
+# Ignore environment variables file
 .env
-*.env
-credentials.json
 
-# System / IDE
-.DS_Store
-.vscode/
-*.log
+# Ignore sensitive credential files
+credentials.json
+token.json
+
+# Ignore virtual environment folder
+venv/
