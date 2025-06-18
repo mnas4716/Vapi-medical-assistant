@@ -1,3 +1,5 @@
+# main.py
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
@@ -37,42 +39,41 @@ async def vapi_webhook(request: Request):
 
     fn = message.get("functionCall", {}).get("name")
     params = message.get("functionCall", {}).get("parameters", {})
-    ctx = message.get("context", {})
+    
+    print(f"✅ Received function call: {fn} with parameters: {params}")
 
     try:
         if fn == "findPatient":
+            # CORRECTED: Passes mobileNumber or dob as expected by clinic_manager.py
             patient = find_patient_in_sheet(
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
-            return {"patientName": patient.get("fullName") if patient else "Not Found"}
+            return {"patientName": patient.get("fullName").split(" ")[0] if patient else "Not Found"}
 
         if fn == "registerNewPatient":
             status = register_patient_in_sheet(params)
             return {"status": "Success" if status else "Failure"}
 
         if fn == "checkAvailability":
-            result = check_calendar_availability(
-                params.get("dateTime"),
-                mobile_number=params.get("mobileNumber"),
-                dob=params.get("dob")
-            )
-            return {"result": result}
+            # This function doesn't need patient details, so it's correct.
+            availability = check_calendar_availability(params.get("dateTime"))
+            return {"result": availability}
 
         if fn == "scheduleAppointment":
+            # CORRECTED: Passes verification details instead of name/reason.
+            # No longer passes 'reason'.
             confirmation = schedule_event_in_calendar(
-                params.get("dateTime"),
-                params.get("reason"),
+                iso_datetime_str=params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
-            return {
-                "confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"
-            }
+            return {"confirmationTime": confirmation.strftime("%A, %B %d at %-I:%M %p") if confirmation else "Failure"}
 
         if fn == "cancelAppointment":
+            # CORRECTED: Passes verification details instead of fullName.
             cancelled = cancel_appointment_in_calendar(
-                params.get("dateTime"),
+                iso_datetime_str=params.get("dateTime"),
                 mobile_number=params.get("mobileNumber"),
                 dob=params.get("dob")
             )
@@ -81,6 +82,7 @@ async def vapi_webhook(request: Request):
         return {"error": f"Unknown function: {fn}"}
 
     except Exception as e:
+        print(f"❌ Exception during function execution: {e}")
         return {"error": f"Exception: {str(e)}"}
 
 # === Optional: /agent endpoint for Vapi (same logic as "/") ===
@@ -88,30 +90,12 @@ async def vapi_webhook(request: Request):
 async def vapi_agent(request: Request):
     return await vapi_webhook(request)
 
-# === Vapi Webhook Endpoints (empty body safe) ===
-@app.post("/webhooks/status-update")
-async def status_update(request: Request):
+# === Vapi Webhook Endpoints for logging (empty body safe) ===
+@app.post("/webhooks/{path:path}")
+async def generic_webhook(path: str, request: Request):
     try:
         data = await request.json()
     except Exception:
         data = {}
-    print("✅ Received status-update:", data)
-    return {"status": "received"}
-
-@app.post("/webhooks/speech-update")
-async def speech_update(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    print("✅ Received speech-update:", data)
-    return {"status": "received"}
-
-@app.post("/webhooks/conversation-update")
-async def conversation_update(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-    print("✅ Received conversation-update:", data)
+    print(f"✅ Received webhook on /{path}: {data}")
     return {"status": "received"}
